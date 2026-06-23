@@ -1,0 +1,732 @@
+/* Keeper Draft Helper - styling */
+
+:root {
+  --bg: #0f1216;
+  --panel: #181d24;
+  --panel-2: #1f2630;
+  --border: #2a323d;
+  --text: #e6e9ee;
+  --muted: #8a94a3;
+  --accent: #4fa3ff;
+  --good: #3fb950;
+  --good-bg: rgba(63, 185, 80, 0.14);
+  --bad: #f05b5b;
+  --bad-bg: rgba(240, 91, 91, 0.14);
+  --meh: #c9a227;
+  --meh-bg: rgba(201, 162, 39, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.subtle {
+  color: var(--muted);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Top bar */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-main h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.topbar-main p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.control-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#teamSelect {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  min-width: 240px;
+}
+
+#teamSelect:disabled {
+  opacity: 0.6;
+}
+
+.ghost-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ghost-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Refresh info + bubble */
+.info-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.refresh-info {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.info-bubble {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+  cursor: help;
+  user-select: none;
+}
+
+.info-bubble:hover,
+.info-bubble:focus {
+  color: var(--text);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.info-tip {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 150%;
+  width: 270px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-style: normal;
+  font-family: inherit;
+  color: var(--text);
+  line-height: 1.45;
+  text-align: left;
+  z-index: 10;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.info-bubble:hover .info-tip,
+.info-bubble:focus .info-tip {
+  display: block;
+}
+
+/* Main */
+main {
+  padding: 24px;
+  max-width: 1240px;
+  margin: 0 auto;
+}
+
+/* Two-column layout (stacks on narrow screens) */
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  align-items: flex-start;
+}
+
+.column {
+  min-width: 0;
+}
+
+/* Keeper helper takes the wider share; available stays narrow. */
+#rosterSection.column {
+  flex: 2 1 480px;
+}
+
+.side-column {
+  flex: 1 1 320px;
+}
+
+.table-wrap {
+  position: relative;
+}
+
+/* Loading overlay shown while suggestions recompute */
+.update-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 60px;
+  background: rgba(15, 18, 22, 0.55);
+  border-radius: 10px;
+  z-index: 5;
+}
+
+.is-updating {
+  pointer-events: none;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Zero state (no team selected) */
+.zero-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 52px 24px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+.zero-state svg {
+  width: 56px;
+  height: 56px;
+  opacity: 0.5;
+  margin-bottom: 14px;
+}
+
+.zero-state p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.status {
+  padding: 16px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.status.error {
+  color: var(--bad);
+}
+
+/* Suggestion banner */
+.suggestion {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  font-size: 14px;
+}
+
+.suggestion strong {
+  color: var(--accent);
+}
+
+.suggestion .warn {
+  color: var(--meh);
+  display: block;
+  margin-top: 6px;
+}
+
+/* Table */
+.roster-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.roster-table th,
+.roster-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.roster-table thead th {
+  background: var(--panel-2);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.roster-table thead th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.roster-table thead th.sortable:hover {
+  color: var(--text);
+}
+
+.roster-table thead th.sortable::after {
+  content: "\2195"; /* up-down arrow: sortable but inactive */
+  margin-left: 6px;
+  font-size: 10px;
+  opacity: 0.35;
+}
+
+.roster-table thead th.sort-asc::after {
+  content: "\2191"; /* up arrow */
+  opacity: 1;
+  color: var(--accent);
+}
+
+.roster-table thead th.sort-desc::after {
+  content: "\2193"; /* down arrow */
+  opacity: 1;
+  color: var(--accent);
+}
+
+.roster-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.roster-table tbody tr.is-top {
+  background: rgba(79, 163, 255, 0.07);
+}
+
+.col-rank {
+  width: 36px;
+  color: var(--muted);
+}
+
+.col-rank-wide {
+  width: 52px;
+}
+
+.col-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.roster-table td.col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Let the numeric headers wrap so those columns can stay narrow. */
+.roster-table thead th.col-num {
+  white-space: normal;
+}
+
+.roster-table th[data-sort="last"] {
+  width: 56px;
+}
+
+.player-name {
+  font-weight: 600;
+}
+
+.player-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.top-badge {
+  display: inline-block;
+  background: var(--accent);
+  color: #06121f;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.traded-note {
+  display: block;
+  color: var(--meh);
+  font-size: 11px;
+  margin-top: 2px;
+  white-space: nowrap; /* keep the note on a single line under the round */
+  line-height: 1.25;
+}
+
+/* Value badges */
+.value-badge {
+  display: inline-block;
+  min-width: 42px;
+  text-align: center;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Legend + gradient swatches */
+.legend {
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legend-row {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.grad-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.grad-bar {
+  display: inline-block;
+  width: 96px;
+  height: 10px;
+  border-radius: 5px;
+  vertical-align: middle;
+  margin: 0 4px;
+}
+
+.grad-value {
+  background: linear-gradient(
+    90deg,
+    hsl(2, 80%, 55%),
+    #6b727d,
+    hsl(140, 80%, 50%)
+  );
+}
+
+/* Star rating (estimated round) */
+.stars {
+  display: inline-flex;
+  gap: 1px;
+}
+
+.star {
+  position: relative;
+  display: inline-block;
+  width: 1em;
+  color: #3a4250; /* empty star */
+  font-size: 13px;
+  line-height: 1;
+}
+
+.star .fg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #f5c518; /* filled star (gold) */
+}
+
+.roster-table td.col-num .stars {
+  margin-top: 3px;
+}
+
+/* Sections */
+.section-title {
+  font-size: 18px;
+  margin: 8px 0 12px;
+}
+
+.section-title .info-bubble {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.side-column > section + section {
+  margin-top: 28px;
+}
+
+.section-sub {
+  margin: -6px 0 12px;
+  font-size: 13px;
+}
+
+/* Draft picks grid */
+.picks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: 6px;
+}
+
+.pick-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pick-cell.pick-none {
+  color: var(--bad);
+  background: var(--bad-bg);
+  border-color: var(--bad);
+}
+
+.pick-cell.pick-none .pick-round {
+  text-decoration: line-through;
+  opacity: 0.8;
+}
+
+.pick-cell.pick-extra {
+  color: var(--good);
+  background: var(--good-bg);
+  border-color: var(--good);
+}
+
+.pick-count {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid currentColor;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.picks-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.pick-note-line {
+  display: block;
+  padding: 2px 0;
+}
+
+.pick-out {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+.pick-in {
+  color: var(--good);
+  font-weight: 600;
+}
+
+/* Roster controls (team dropdown above the table) */
+.roster-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* Balance slider */
+.balance-control {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.balance-control > label {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.balance-track {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.balance-end {
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+#balanceSlider {
+  flex: 1 1 auto;
+  height: 26px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+#balanceSlider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--good), var(--accent));
+}
+
+#balanceSlider::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--good), var(--accent));
+}
+
+#balanceSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -8px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid #fff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+#balanceSlider::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid #fff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+/* Suggested-keeper banner items (one per line) */
+.suggest-head {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.suggest-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.suggest-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.suggest-title {
+  display: inline-flex;
+  align-items: center;
+}
+
+.suggest-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.suggest-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.keeper-chip {
+  background: rgba(79, 163, 255, 0.14);
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.suggest-value {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.suggestion .stars {
+  vertical-align: middle;
+}
+
+/* Rookie badge */
+.rookie-badge {
+  display: inline-block;
+  background: #d2691e;
+  color: #1a0f06;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* Footer */
+.footer {
+  padding: 16px 24px;
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+}
