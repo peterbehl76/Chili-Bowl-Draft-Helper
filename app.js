@@ -59,6 +59,7 @@ const state = {
   lastYearRound: {}, // pid -> round drafted last year
   picksOwned: {}, // rosterId -> { round -> count } for nextSeason
   currentRows: [], // analyzed rows for the selected roster
+  currentRosterId: null, // the selected roster id (for pick-ownership checks)
   currentTopPids: new Set(), // pids of the suggested keepers (top 2 by value)
   sortState: { key: "value", dir: "desc" }, // active table sort
   leagueId: "", // resolved (latest) league id actually in use
@@ -763,6 +764,7 @@ function renderRoster(rosterId) {
     return;
   }
 
+  state.currentRosterId = rosterId;
   state.currentRows = team.players.map((pid) => analyzePlayer(rosterId, pid));
   section.classList.remove("hidden");
   applyScoring();
@@ -886,20 +888,31 @@ function applyScoring() {
         "</span>" +
         '<span class="suggest-tags">' +
         '<span class="keeper-chip">Round #' + row.keeperRound + "</span>" +
+        '<span class="value-cluster">' +
         '<span class="value-badge suggest-value" style="color:' + vStyle.color +
         ";background:" + valueBg + '">Value ' + sign + row.value + "</span>" +
         stars +
+        "</span>" +
         "</span>" +
         "</span>"
       );
     });
     let html =
       '<strong class="suggest-head">Suggested keepers</strong>' + items.join("");
+    // Only warn about a same-round collision if you do not actually own enough
+    // picks in that round (extra picks from trades make two keepers possible).
     if (top.length === 2 && top[0].keeperRound === top[1].keeperRound) {
-      html +=
-        '<span class="warn">Heads up: both land on round ' +
-        top[0].keeperRound +
-        " - you cannot spend the same pick twice, so only one can be kept at that round.</span>";
+      const round = top[0].keeperRound;
+      const owned = (state.picksOwned[state.currentRosterId] || {})[round] || 0;
+      if (owned < 2) {
+        html +=
+          '<span class="warn">Heads up: both land on round ' + round +
+          " and you only have one pick there - you can keep just one of them at that round.</span>";
+      } else {
+        html +=
+          '<span class="ok-note">Both land on round ' + round + ", and you have " +
+          owned + " picks there - so you can keep both.</span>";
+      }
     }
     suggestion.innerHTML = html;
   } else {

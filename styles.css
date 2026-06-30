@@ -281,6 +281,12 @@ main {
   margin-top: 6px;
 }
 
+.suggestion .ok-note {
+  color: var(--good);
+  display: block;
+  margin-top: 6px;
+}
+
 /* Table */
 .roster-table {
   width: 100%;
@@ -687,7 +693,14 @@ main {
 .suggest-tags {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 16px;
+}
+
+/* Value pill + stars read as one "how good" unit, distinct from the cost chip */
+.value-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .keeper-chip {
