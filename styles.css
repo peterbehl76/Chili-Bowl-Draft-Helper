@@ -659,9 +659,53 @@ main {
 }
 
 /* Suggested-keeper banner items (one per line) */
+/* Heading row: title on the left, the negative-value filter on the right */
+.suggest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 10px;
+}
+
 .suggest-head {
   display: block;
-  margin-bottom: 10px;
+}
+
+.suggest-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.suggest-toggle input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.suggest-toggle:hover {
+  color: var(--text);
+}
+
+/* Keeps the "traded away" note stacked under the round chip, as in the table */
+.keeper-cluster {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.keeper-cluster .traded-note {
+  margin-top: 0;
 }
 
 .suggest-item {

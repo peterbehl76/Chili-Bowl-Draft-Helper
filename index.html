@@ -13,17 +13,19 @@
       <p id="seasonNote" class="subtle"></p>
     </div>
     <div class="topbar-controls">
-      <button id="refreshBtn" class="ghost-btn" title="Re-fetch the latest Sleeper ADP">
-        Refresh ADP
+      <button id="refreshBtn" class="ghost-btn"
+        title="Re-check league managers and rosters, and re-fetch the latest Sleeper ADP">
+        Refresh
       </button>
       <span class="info-wrap">
         <span id="refreshInfo" class="refresh-info"></span>
         <span class="info-bubble" tabindex="0" role="button" aria-label="About data freshness">i
           <span class="info-tip">
             Player rankings are downloaded from Sleeper and cached in your browser
-            for 24 hours - "Rankings updated" shows when. League rosters, the draft,
-            and trades are loaded fresh every time you open the page. Click
-            "Refresh rankings" to pull the latest ranks right now.
+            for 24 hours - "ADP updated" shows when. League rosters, the draft,
+            and trades are loaded fresh every time you open the page. Which season's
+            league is in use is re-checked once a day. Click "Refresh" to pull the
+            latest ADP and re-check managers and rosters right now.
           </span>
         </span>
       </span>
@@ -66,7 +68,17 @@
             </div>
           </div>
 
-          <div id="suggestion" class="suggestion"></div>
+          <div id="suggestion" class="suggestion">
+            <div class="suggest-header">
+              <strong class="suggest-head">Suggested keepers</strong>
+              <label class="suggest-toggle" for="hideNegative"
+                title="Do not suggest players who project to be drafted later than their keeper round">
+                <input type="checkbox" id="hideNegative" />
+                Don't suggest negative value
+              </label>
+            </div>
+            <div id="suggestionBody"></div>
+          </div>
 
           <div class="table-wrap">
             <table id="rosterTable" class="roster-table">

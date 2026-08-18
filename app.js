@@ -9,9 +9,14 @@
  * NOTE: Sleeper creates a NEW league_id every season (linked only backward via
  * previous_league_id). SEED_LEAGUE_ID below is just a starting point: on load
  * the app walks the chain FORWARD to the most recent season's league and uses
- * that automatically (see resolveLatestLeague). You normally never need to
- * touch the seed; it is only the fallback if forward discovery finds nothing
- * newer (e.g. before next season's league has been created).
+ * that automatically (see resolveLeagues). You normally never need to touch the
+ * seed; it is only the fallback if forward discovery finds nothing newer (e.g.
+ * before next season's league has been created).
+ *
+ * Two leagues are in play once a season is renewed but not yet drafted: the
+ * NEWEST league supplies managers, co-managers and rosters (so manager changes
+ * show up), while the last DRAFT-COMPLETE league supplies the draft rounds that
+ * keeper costs are calculated from.
  */
 
 /** Seed Sleeper league id; the app auto-advances to the latest season from here. */
@@ -25,10 +30,13 @@ const PLAYERS_CACHE_KEY = "khelper_players_v3";
 const PLAYERS_CACHE_TS = "khelper_players_ts_v3";
 const PLAYERS_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** localStorage keys + TTL for the resolved latest league id (refreshed daily). */
-const RESOLVED_ID_KEY = "khelper_resolved_id_v1";
-const RESOLVED_SEED_KEY = "khelper_resolved_seed_v1";
-const RESOLVED_TS_KEY = "khelper_resolved_ts_v1";
+/**
+ * localStorage keys + TTL for the resolved league pair (refreshed daily). v2
+ * stores both ids, because the roster league and the draft league can differ.
+ */
+const RESOLVED_KEY = "khelper_resolved_v2";
+const RESOLVED_SEED_KEY = "khelper_resolved_seed_v2";
+const RESOLVED_TS_KEY = "khelper_resolved_ts_v2";
 const RESOLVED_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** localStorage key for the value-vs-quality balance slider (0..1). */
@@ -50,27 +58,31 @@ const ADP_TTL_MS = 12 * 60 * 60 * 1000;
 /** In-memory state assembled on load. */
 const state = {
   leagueName: "",
-  season: 0,
-  nextSeason: 0,
+  season: 0, // season of the roster league (newest)
+  draftSeason: 0, // season of the draft the keeper costs are based on
+  nextSeason: 0, // the upcoming draft season that keepers are being set for
   numTeams: 0,
   numRounds: 0,
   players: {}, // pid -> { name, pos, team, rank }
-  teams: [], // { rosterId, ownerId, teamName, players: [pid] }
-  lastYearRound: {}, // pid -> round drafted last year
+  teams: [], // { rosterId, ownerId, teamName, managers: [name], players: [pid] }
+  lastYearRound: {}, // pid -> round drafted in the basis draft
   picksOwned: {}, // rosterId -> { round -> count } for nextSeason
   currentRows: [], // analyzed rows for the selected roster
   currentRosterId: null, // the selected roster id (for pick-ownership checks)
   currentTopPids: new Set(), // pids of the suggested keepers (top 2 by value)
   sortState: { key: "value", dir: "desc" }, // active table sort
-  leagueId: "", // resolved (latest) league id actually in use
+  leagueId: "", // resolved newest league id (rosters, managers, pick ownership)
+  draftLeagueId: "", // league whose completed draft sets keeper costs
   advanced: false, // true if forward discovery moved past the seed league
   playersUpdatedAt: 0, // epoch ms the player rankings were last fetched
   qualityWeight: 0.5, // 0 = rank by surplus value, 1 = rank by player quality
+  hideNegative: false, // when on, skip negative-value (overpay) players
   draftablePositions: new Set(), // positions this league actually rosters
   tradedPicksNext: [], // next-season traded pick entries (for who-traded-what)
   adpById: {}, // player_id -> Sleeper ADP (overall pick number)
   usingAdp: false, // true when Sleeper ADP loaded; false falls back to search_rank
   adpField: "adp_ppr", // which Sleeper ADP field matches this league
+  adpSeason: 0, // season the loaded ADP came from (may trail nextSeason)
   adpUpdatedAt: 0, // epoch ms ADP was last fetched
 };
 
@@ -271,6 +283,33 @@ async function loadAdp(season, adpField, force) {
 }
 
 /**
+ * Load ADP for the upcoming draft, falling back to the most recent season that
+ * actually has ADP published.
+ *
+ * Sleeper only publishes a season's ADP during that season's preseason. Once our
+ * draft is done the app looks ahead to NEXT year's keepers, and next year's ADP
+ * does not exist yet - so asking only for the target season would find nothing
+ * all season long and drop to the much rougher search_rank. Today's published
+ * ADP is a real draft-value curve and a far better estimate, so use it.
+ *
+ * @param {number} targetSeason - the upcoming draft season.
+ * @param {string} adpField - the adp_* field to read.
+ * @param {boolean} force - skip the cache.
+ * @returns {Promise<{byId: Object, count: number, season: number}>} ADP data
+ *   plus the season it actually came from.
+ */
+async function loadAdpLatest(targetSeason, adpField, force) {
+  // One year back is enough: the current season's ADP is always published.
+  for (let season = targetSeason; season >= targetSeason - 1; season--) {
+    const result = await loadAdp(season, adpField, force);
+    if (result.count > 0) {
+      return { byId: result.byId, count: result.count, season: season };
+    }
+  }
+  return { byId: {}, count: 0, season: targetSeason };
+}
+
+/**
  * Attach loaded ADP onto the in-memory player objects (by id).
  */
 function applyAdpToPlayers() {
@@ -354,110 +393,186 @@ async function findNextLeague(memberIds, season, prevId) {
 }
 
 /**
- * Walk forward from a seed league to the most recent season's league. Sleeper
- * only links seasons backward, so we discover newer leagues via member
- * accounts. Falls back to the seed if nothing newer exists yet.
+ * Walk forward from a seed league to the most recent season's league, and also
+ * report the most recent league whose draft is complete. Sleeper only links
+ * seasons backward, so we discover newer leagues via member accounts.
+ *
+ * The two can differ, and that difference matters: managers, co-managers and
+ * rosters must come from the NEWEST league (so dropped/added managers show up),
+ * while keeper costs must come from the last COMPLETED draft. Before the new
+ * season drafts, those are two different leagues.
  *
  * @param {string} seedId - the seed league id.
- * @returns {Promise<{leagueId: string, league: Object}>} the latest league.
+ * @returns {Promise<{rosterLeague: Object, draftLeague: Object}>} the pair.
  */
-async function resolveLatestLeague(seedId) {
-  let leagueId = seedId;
-  let league = await fetchJson(SLEEPER + "/league/" + leagueId);
+async function resolveLeagues(seedId) {
+  let league = await fetchJson(SLEEPER + "/league/" + seedId);
+  let draftLeague = draftDone(league) ? league : null;
 
   let memberIds = [];
   try {
-    const users = await fetchJson(SLEEPER + "/league/" + leagueId + "/users");
+    const users = await fetchJson(SLEEPER + "/league/" + seedId + "/users");
     memberIds = users.map((usr) => usr.user_id);
   } catch (err) {
-    return { leagueId, league }; // cannot walk forward without members
+    return { rosterLeague: league, draftLeague: draftLeague || league };
   }
 
   const maxSeason = new Date().getFullYear() + 1; // allow next-year offseason
   let guard = 0;
   while (Number(league.season) < maxSeason && guard < 12) {
     guard++;
-    const next = await findNextLeague(memberIds, Number(league.season) + 1, leagueId);
+    const next = await findNextLeague(
+      memberIds,
+      Number(league.season) + 1,
+      league.league_id
+    );
     if (!next) break;
-    // Only advance once the newer season's draft has happened; otherwise we
-    // would lose the last completed draft that keeper costs depend on.
-    if (!draftDone(next)) break;
-    leagueId = next.league_id;
+    // Always advance to the newer league so the manager list stays current;
+    // remember the newest completed draft separately for keeper costs.
     league = next;
+    if (draftDone(next)) draftLeague = next;
     try {
-      const u2 = await fetchJson(SLEEPER + "/league/" + leagueId + "/users");
+      const u2 = await fetchJson(SLEEPER + "/league/" + league.league_id + "/users");
       if (u2.length) memberIds = u2.map((usr) => usr.user_id);
     } catch (err) {
       // Keep the previous member list if the new one cannot be fetched.
     }
   }
-  return { leagueId, league };
+  // No completed draft anywhere in the chain: fall back to the newest league so
+  // the app still renders (every player simply reads as undrafted).
+  return { rosterLeague: league, draftLeague: draftLeague || league };
 }
 
 /**
- * Resolve the latest league id, using a 24h cache so forward discovery runs at
- * most once a day. The cache is keyed by seed so changing the seed re-resolves.
+ * Resolve the league pair, using a 24h cache so forward discovery runs at most
+ * once a day. The cache is keyed by seed so changing the seed re-resolves.
  *
- * @returns {Promise<{leagueId: string, league: Object}>} the latest league.
+ * @param {boolean} force - skip the cache and re-run forward discovery.
+ * @returns {Promise<{rosterLeague: Object, draftLeague: Object}>} the pair.
  */
-async function getLatestLeague() {
-  try {
-    const ts = Number(localStorage.getItem(RESOLVED_TS_KEY) || 0);
-    const seed = localStorage.getItem(RESOLVED_SEED_KEY);
-    const id = localStorage.getItem(RESOLVED_ID_KEY);
-    if (id && seed === SEED_LEAGUE_ID && Date.now() - ts < RESOLVED_TTL_MS) {
-      const league = await fetchJson(SLEEPER + "/league/" + id);
-      if (league && league.league_id) return { leagueId: id, league };
+async function getLeagues(force) {
+  if (!force) {
+    try {
+      const ts = Number(localStorage.getItem(RESOLVED_TS_KEY) || 0);
+      const seed = localStorage.getItem(RESOLVED_SEED_KEY);
+      const raw = localStorage.getItem(RESOLVED_KEY);
+      if (raw && seed === SEED_LEAGUE_ID && Date.now() - ts < RESOLVED_TTL_MS) {
+        const ids = JSON.parse(raw);
+        if (ids && ids.rosterLeagueId && ids.draftLeagueId) {
+          const [rosterLeague, draftLeague] = await Promise.all([
+            fetchJson(SLEEPER + "/league/" + ids.rosterLeagueId),
+            ids.draftLeagueId === ids.rosterLeagueId
+              ? null
+              : fetchJson(SLEEPER + "/league/" + ids.draftLeagueId),
+          ]);
+          if (rosterLeague && rosterLeague.league_id) {
+            return { rosterLeague, draftLeague: draftLeague || rosterLeague };
+          }
+        }
+      }
+    } catch (err) {
+      // Fall through to a fresh resolve on any cache/parse problem.
     }
-  } catch (err) {
-    // Fall through to a fresh resolve on any cache/parse problem.
   }
 
-  const resolved = await resolveLatestLeague(SEED_LEAGUE_ID);
+  const resolved = await resolveLeagues(SEED_LEAGUE_ID);
   try {
-    localStorage.setItem(RESOLVED_ID_KEY, resolved.leagueId);
+    localStorage.setItem(
+      RESOLVED_KEY,
+      JSON.stringify({
+        rosterLeagueId: resolved.rosterLeague.league_id,
+        draftLeagueId: resolved.draftLeague.league_id,
+      })
+    );
     localStorage.setItem(RESOLVED_SEED_KEY, SEED_LEAGUE_ID);
     localStorage.setItem(RESOLVED_TS_KEY, String(Date.now()));
   } catch (err) {
-    // Non-fatal: we just will not have a cached id next time.
+    // Non-fatal: we just will not have a cached pair next time.
   }
   return resolved;
 }
 
 /**
- * Fetch and assemble all league data into `state`.
+ * Load traded picks from both the roster league and the draft league and merge
+ * them. A pick traded during last season is recorded on last season's league,
+ * while one traded after the renewal lands on the new league, so neither source
+ * alone is complete. A pick is identified by season + round + originating
+ * roster; when both leagues know about one, the newer league wins because it
+ * reflects any later re-trade. Safe to merge because roster ids are stable
+ * across a renewal (the franchise keeps its id even if the manager changes).
+ *
+ * @param {string} rosterLeagueId - the newest league id.
+ * @param {string} draftLeagueId - the last draft-complete league id.
+ * @returns {Promise<Object[]>} merged traded-pick entries (all seasons).
  */
-async function loadLeague() {
+async function loadTradedPicks(rosterLeagueId, draftLeagueId) {
+  const urls = [SLEEPER + "/league/" + rosterLeagueId + "/traded_picks"];
+  if (draftLeagueId !== rosterLeagueId) {
+    urls.push(SLEEPER + "/league/" + draftLeagueId + "/traded_picks");
+  }
+
+  const results = await Promise.all(
+    urls.map((url) => fetchJson(url).catch(() => []))
+  );
+
+  // Insert oldest-league entries first so the newest league overwrites them.
+  const merged = new Map();
+  for (const list of results.slice().reverse()) {
+    for (const tp of list || []) {
+      merged.set(tp.season + "|" + tp.round + "|" + tp.roster_id, tp);
+    }
+  }
+  return Array.from(merged.values());
+}
+
+/**
+ * Fetch and assemble all league data into `state`.
+ *
+ * @param {boolean} force - re-resolve the league pair and re-fetch ADP, instead
+ *   of using the 24h/12h caches. Used by the Refresh button so manager changes
+ *   are picked up on demand.
+ */
+async function loadLeague(force) {
   setStatus("Loading league...");
 
-  const { leagueId, league } = await getLatestLeague();
-  state.leagueId = leagueId;
-  state.advanced = leagueId !== SEED_LEAGUE_ID;
-  state.leagueName = league.name;
-  state.season = Number(league.season);
-  state.nextSeason = state.season + 1;
-  state.numTeams = league.total_rosters;
+  const { rosterLeague, draftLeague } = await getLeagues(force);
+  const leagueId = rosterLeague.league_id;
+  const draftLeagueId = draftLeague.league_id;
 
-  const draftId = league.draft_id;
-  state.adpField = adpFieldFor(league);
+  state.leagueId = leagueId;
+  state.draftLeagueId = draftLeagueId;
+  state.advanced = leagueId !== SEED_LEAGUE_ID;
+  state.leagueName = rosterLeague.name;
+  state.season = Number(rosterLeague.season);
+  state.draftSeason = Number(draftLeague.season);
+  // The upcoming draft: this season's if it has not happened yet, else next.
+  state.nextSeason = draftDone(rosterLeague) ? state.season + 1 : state.season;
+  state.numTeams = rosterLeague.total_rosters;
+  state.adpField = adpFieldFor(rosterLeague);
+
+  // Rounds come from the UPCOMING draft (populated even while pre-draft);
+  // last year's rounds come from the last COMPLETED draft.
+  const upcomingDraftId = rosterLeague.draft_id;
+  const basisDraftId = draftLeague.draft_id;
 
   // Sleeper endpoints, the cached player file, and Sleeper ADP load in parallel.
   const [players, users, rosters, draft, picks, tradedPicks, adp] = await Promise.all([
     loadPlayers(false),
     fetchJson(SLEEPER + "/league/" + leagueId + "/users"),
     fetchJson(SLEEPER + "/league/" + leagueId + "/rosters"),
-    fetchJson(SLEEPER + "/draft/" + draftId),
-    fetchJson(SLEEPER + "/draft/" + draftId + "/picks"),
-    fetchJson(SLEEPER + "/league/" + leagueId + "/traded_picks"),
-    loadAdp(state.nextSeason, state.adpField, false),
+    fetchJson(SLEEPER + "/draft/" + upcomingDraftId),
+    fetchJson(SLEEPER + "/draft/" + basisDraftId + "/picks"),
+    loadTradedPicks(leagueId, draftLeagueId),
+    loadAdpLatest(state.nextSeason, state.adpField, force),
   ]);
 
   state.players = players;
   state.adpById = adp.byId;
   state.usingAdp = adp.count > 0;
+  state.adpSeason = adp.season;
   applyAdpToPlayers();
   state.numRounds = (draft.settings && draft.settings.rounds) || 16;
-  state.draftablePositions = derivePositions(league.roster_positions);
+  state.draftablePositions = derivePositions(rosterLeague.roster_positions);
 
   // Map owner -> display info.
   const userById = {};
@@ -469,15 +584,27 @@ async function loadLeague() {
     };
   }
 
-  // Teams, sorted by team name for a stable dropdown.
+  // Teams, sorted by team name for a stable dropdown. Sleeper has no
+  // roster-level team name, so the label comes from the primary manager; the
+  // roster_id is what actually identifies the franchise across seasons.
   state.teams = rosters
     .map((ros) => {
-      const info = userById[ros.owner_id] || { teamName: "Roster " + ros.roster_id, ownerName: "" };
+      const info = userById[ros.owner_id] || {
+        teamName: "Roster " + ros.roster_id,
+        ownerName: "",
+      };
+      // Primary manager first, then any co-managers.
+      const managers = [];
+      if (info.ownerName) managers.push(info.ownerName);
+      for (const coId of ros.co_owners || []) {
+        const co = userById[coId];
+        if (co && co.ownerName && coId !== ros.owner_id) managers.push(co.ownerName);
+      }
       return {
         rosterId: ros.roster_id,
         ownerId: ros.owner_id,
         teamName: info.teamName,
-        ownerName: info.ownerName,
+        managers: managers,
         players: ros.players || [],
       };
     })
@@ -704,8 +831,11 @@ function renderTeamOptions() {
   for (const team of state.teams) {
     const opt = document.createElement("option");
     opt.value = String(team.rosterId);
-    const owner = team.ownerName ? " (" + team.ownerName + ")" : "";
-    opt.textContent = team.teamName + owner;
+    const managers = team.managers || [];
+    // A manager with no team name set would otherwise read "Name (Name)".
+    const redundant = managers.length === 1 && managers[0] === team.teamName;
+    const suffix = managers.length && !redundant ? " (" + managers.join(" + ") + ")" : "";
+    opt.textContent = team.teamName + suffix;
     sel.appendChild(opt);
   }
   sel.disabled = false;
@@ -859,11 +989,16 @@ function renderDraftPicks(rosterId) {
  * changes - it does not recompute the per-player keeper math.
  */
 function applyScoring() {
-  const suggestion = document.getElementById("suggestion");
+  const suggestion = document.getElementById("suggestionBody");
   const rows = state.currentRows;
   const weight = state.qualityWeight;
 
-  const byScore = rows
+  // Overpays (negative value) are normally not worth suggesting at all, so the
+  // toggle filters them out of the candidate pool before ranking. Break-even
+  // (value 0) still counts as a legitimate keep.
+  const eligible = state.hideNegative ? rows.filter((row) => row.value >= 0) : rows;
+
+  const byScore = eligible
     .slice()
     .sort((aRow, bRow) => keeperScore(bRow, weight) - keeperScore(aRow, weight));
   const topCount = Math.min(2, byScore.length);
@@ -887,7 +1022,10 @@ function applyScoring() {
         escapeHtml(row.team) + " - " + rankTxt + "</span>" +
         "</span>" +
         '<span class="suggest-tags">' +
+        '<span class="keeper-cluster">' +
         '<span class="keeper-chip">Round #' + row.keeperRound + "</span>" +
+        keeperNoteHtml(row) +
+        "</span>" +
         '<span class="value-cluster">' +
         '<span class="value-badge suggest-value" style="color:' + vStyle.color +
         ";background:" + valueBg + '">Value ' + sign + row.value + "</span>" +
@@ -897,8 +1035,7 @@ function applyScoring() {
         "</span>"
       );
     });
-    let html =
-      '<strong class="suggest-head">Suggested keepers</strong>' + items.join("");
+    let html = items.join("");
     // Only warn about a same-round collision if you do not actually own enough
     // picks in that round (extra picks from trades make two keepers possible).
     if (top.length === 2 && top[0].keeperRound === top[1].keeperRound) {
@@ -915,6 +1052,12 @@ function applyScoring() {
       }
     }
     suggestion.innerHTML = html;
+  } else if (state.hideNegative && rows.length) {
+    // Everyone on the roster costs more than they project to be drafted for.
+    suggestion.innerHTML =
+      '<span class="warn">No keeper is worth its cost - every player here ' +
+      "projects to go later than his keeper round. Uncheck " +
+      '"Don\'t suggest negative value" to see the closest calls anyway.</span>';
   } else {
     suggestion.textContent = "";
   }
@@ -957,15 +1100,7 @@ function renderBody(rows, topPids) {
     const rating = starRating(row.estRound);
     const starsHtml = rating > 0 ? "<br />" + renderStars(rating) : "";
 
-    let keeperCell = "R" + row.keeperRound;
-    if (row.cascadedFrom.length) {
-      keeperCell +=
-        '<span class="traded-note">traded away R' +
-        row.cascadedFrom[0] +
-        " pick</span>";
-    } else if (row.noRound1Pick) {
-      keeperCell += '<span class="traded-note">no R1 pick owned</span>';
-    }
+    const keeperCell = "R" + row.keeperRound + keeperNoteHtml(row);
 
     const topBadge = topPids.has(row.pid) ? '<span class="top-badge">Top keeper</span>' : "";
 
@@ -983,6 +1118,24 @@ function renderBody(rows, topPids) {
 
     body.appendChild(tr);
   });
+}
+
+/**
+ * Warning note for a keeper round that had to move because the roster does not
+ * own the pick it would naturally cost. Shared by the roster table and the
+ * suggestion banner so the two cannot drift apart.
+ *
+ * @param {Object} row - an analyzed player row.
+ * @returns {string} note HTML, or an empty string when no note applies.
+ */
+function keeperNoteHtml(row) {
+  if (row.cascadedFrom.length) {
+    return '<span class="traded-note">traded away R' + row.cascadedFrom[0] + " pick</span>";
+  }
+  if (row.noRound1Pick) {
+    return '<span class="traded-note">no R1 pick owned</span>';
+  }
+  return "";
 }
 
 /**
@@ -1195,10 +1348,65 @@ function setupBalanceSlider() {
   });
 }
 
+/**
+ * Wire up the "don't suggest negative value" checkbox. Deliberately NOT
+ * persisted: every page load starts unfiltered so the suggestions show the raw
+ * ranking, and hiding overpays is an explicit per-visit choice. Re-scoring is
+ * cheap, so it applies immediately with no debounce.
+ */
+function setupNegativeToggle() {
+  const box = document.getElementById("hideNegative");
+  if (!box) return;
+
+  // The markup is the single source of truth for the starting state.
+  state.hideNegative = box.checked;
+
+  box.addEventListener("change", () => {
+    state.hideNegative = box.checked;
+    if (state.currentRows.length) applyScoring();
+  });
+}
+
+/**
+ * Render the page title, the season summary line, and the data-source footnote.
+ * Called on load and again after a refresh, since a refresh can advance the
+ * league to a new season or change the manager list.
+ */
+function renderHeader() {
+  const pageTitle = state.leagueName + " - Draft Helper";
+  document.getElementById("leagueName").textContent = pageTitle;
+  document.title = pageTitle;
+
+  // The roster season and the basis-draft season differ before a new draft.
+  const basis =
+    state.draftSeason === state.season
+      ? "the " + state.season + " draft"
+      : "the " + state.draftSeason + " draft";
+  document.getElementById("seasonNote").textContent =
+    "Keeper suggestions for " + state.nextSeason + " - based on current " +
+    state.season + " rosters (including trades) and " + basis + " - " +
+    state.numTeams + " teams, " + state.numRounds + " rounds" +
+    (state.advanced ? " - auto-advanced to the latest season" : "");
+
+  // Mid-season the target season's ADP does not exist yet, so we show today's.
+  const adpAge =
+    state.adpSeason === state.nextSeason
+      ? ""
+      : " Using " + state.adpSeason + " ADP - " + state.nextSeason +
+        " ADP is not published until that preseason.";
+  document.getElementById("dataNote").textContent = state.usingAdp
+    ? "Rosters/draft/trades from the Sleeper API. Draft value uses Sleeper's " +
+      "own ADP (" + state.adpField.replace("adp_", "").toUpperCase() +
+      "), fetched live and cached for 12h." + adpAge
+    : "Data from the Sleeper API. Sleeper ADP was unavailable, so rank falls " +
+      "back to Sleeper's search ranking.";
+}
+
 /** Wire up the page and load the league. */
 async function init() {
   setupSortHandlers();
   setupBalanceSlider();
+  setupNegativeToggle();
 
   document.getElementById("teamSelect").addEventListener("change", (evt) => {
     const val = evt.target.value;
@@ -1214,38 +1422,46 @@ async function init() {
   });
 
   document.getElementById("refreshBtn").addEventListener("click", async () => {
+    const btn = document.getElementById("refreshBtn");
+    const sel = document.getElementById("teamSelect");
+    const previous = sel.value;
+    btn.disabled = true;
     try {
-      setStatus("Refreshing ADP from Sleeper...");
-      const adp = await loadAdp(state.nextSeason, state.adpField, true);
-      state.adpById = adp.byId;
-      state.usingAdp = adp.count > 0;
-      applyAdpToPlayers();
-      const sel = document.getElementById("teamSelect");
-      updateRefreshInfo();
+      setStatus("Refreshing league and ADP from Sleeper...");
+      // Re-resolve the league too: managers can be dropped, added, or given a
+      // co-manager between visits, and the resolved league is cached for 24h.
+      await loadLeague(true);
+      renderHeader();
+      renderTeamOptions();
       renderAvailable();
-      setStatus(adp.count > 0 ? "ADP refreshed." : "Could not refresh ADP.", adp.count === 0);
-      if (sel.value !== "") renderRoster(Number(sel.value));
+      updateRefreshInfo();
+
+      // Keep the user on the same franchise if it still exists.
+      const stillThere = state.teams.some((tm) => String(tm.rosterId) === previous);
+      if (previous !== "" && stillThere) {
+        sel.value = previous;
+        renderRoster(Number(previous));
+      } else {
+        sel.value = "";
+        document.getElementById("resultsSection").classList.add("hidden");
+        document.getElementById("draftPicksSection").classList.add("hidden");
+        const zero = document.getElementById("zeroState");
+        if (zero) zero.classList.remove("hidden");
+      }
+      setStatus(
+        state.usingAdp ? "League and ADP refreshed." : "League refreshed, but ADP was unavailable.",
+        !state.usingAdp
+      );
     } catch (err) {
-      setStatus("Could not refresh ADP: " + err.message, true);
+      setStatus("Could not refresh: " + err.message, true);
+    } finally {
+      btn.disabled = false;
     }
   });
 
   try {
-    await loadLeague();
-    const pageTitle = state.leagueName + " - Draft Helper";
-    document.getElementById("leagueName").textContent = pageTitle;
-    document.title = pageTitle;
-    document.getElementById("seasonNote").textContent =
-      "Keeper suggestions for " + state.nextSeason + " - based on current " + state.season +
-      " rosters (including trades) and the " + state.season + " draft - " +
-      state.numTeams + " teams, " + state.numRounds + " rounds" +
-      (state.advanced ? " - auto-advanced to the latest season" : "");
-    document.getElementById("dataNote").textContent = state.usingAdp
-      ? "Rosters/draft/trades from the Sleeper API. Draft value uses Sleeper's " +
-        "own ADP (" + state.adpField.replace("adp_", "").toUpperCase() +
-        "), fetched live and cached for 12h."
-      : "Data from the Sleeper API. Sleeper ADP was unavailable, so rank falls " +
-        "back to Sleeper's search ranking.";
+    await loadLeague(false);
+    renderHeader();
     renderTeamOptions();
     renderAvailable();
     document.getElementById("rosterSection").classList.remove("hidden");
